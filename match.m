@@ -16,7 +16,7 @@ parameters; % load variables
 % TODO
 
 % size: samples X antennas
-filename = "recording-45in-to-20in-150deg-to-90deg-moving-7sec.dat";
+filename = "data/recording-45in-to-20in-150deg-to-90deg-moving-7sec.dat";
 disp(strcat('Reading data file [',filename,'].'));
 tic
 samples = readmatrix(filename);
@@ -49,7 +49,9 @@ parpool
 num_recorded_frames = length(samples)/SamplesPerFrame;
 num_packets = 50; % pre-allocation length for arrays
 packet_indices = zeros(M,num_packets); % indices in samples where 
-start_search_index = 2.5e6; % in case you have weird data at the start
+%start_search_index = 2.5e6; % in case you have weird data at the start
+start_search_index = 88e4;
+%start_search_index = 950050;
 index = ones(M,1)*start_search_index;
 
 % spotfi expects H in this order
@@ -90,7 +92,8 @@ T = 1; % number of transmitter antennas
 paramRange = struct;
 paramRange.GridPts = [101 101 1]; % number of grid points in the format [number of grid points for ToF (Time of flight), number of grid points for angle of arrival (AoA), 1]
 paramRange.delayRange = [-50 50]*1e-9; % lowest and highest values to consider for ToF grid. 
-paramRange.angleRange = 90*[-1 1]; % lowest and highest values to consider for AoA grid.
+%paramRange.angleRange = 90*[-1 1]; % lowest and highest values to consider for AoA grid.
+paramRange.angleRange = [0 360]; % as a circle
 do_second_iter = 0;
 % paramRange.seconditerGridPts = [1 51 21 21];
 paramRange.K = floor(M/2)+1; % parameter related to smoothing.  
@@ -156,15 +159,8 @@ while ~done
             % compute Bit Error Rate
             cbits = sum(bits == bits_data);
             BER(i,bidx(i)) = 100*(1-(cbits/length(bits)));
-            if BER(i,bidx(i)) > 0
-                % we had some error, so this packet is bad :(
-                fprintf('e');
-                % we can ignore spotfi for this packet
-                % TODO -- skip spotfi for this packet
-            end
-            bidx(i) = bidx(i)+1;
             % keep searching
-            index(i) = index(i) + ceil(current_index/2);
+            index(i) = index(i) + current_index;
             % with skipping windows -- we can't skip num_samples ahead
             % because sometimes the packet isn't num_samples ahead
             % (ie, if the packet was broken in the middle, or if some
@@ -172,6 +168,18 @@ while ~done
             % ---
         end % packet detection loop
     end % antenna loop
+    % skip packets that yield non-zero BER
+    % assert bidx() is all the same
+    if sum(bidx == bidx(1)) < length(bidx)
+        fprintf('b');
+    end
+    if sum(BER(:,bidx(1))) > 0 % threshold?
+        fprintf('e');
+        continue;
+    end
+    for i=1:M
+        bidx(i) = bidx(i)+1;
+    end
     % check alignment of packets
     %  we expect packets to be miss-aligned by only a few samples
     % for now, let's just require them to be within 100 samples
@@ -202,7 +210,6 @@ while ~done
     end
     % else, detected packets are aligned, so we can compute spotfi estimates
     examine = 1:M; % reset examine array to all M antennas
-    
     % spotfi
     % https://bitbucket.org/mkotaru/spotfimusicaoaestimation/src/master/
     CSI_reshaped = reshape(CSI,N*M,1); % reshape channel state information for spotfi
@@ -266,15 +273,20 @@ disp('Done.');
 
 %trim = start_search_index;
 trim = 1;
-figure
+figure('Renderer', 'painters', 'Position', [10 10 900 600])
 for i=1:M
     subplot(M,1,i)
     hold on
-    plot(trim:length(samples(:,i)),real(samples(trim:end,i)))
-    plot(packet_indices(i,BER(i,:) == 0),zeros(1,length(BER(i,BER(i,:) == 0))),'*')
-    title(strcat("RX Antenna ",num2str(i+1)," - ",filename))
-    xlabel('samples')
-    ylabel('amplitude')
+    plot(trim:length(samples(:,i)),real(samples(trim:end,i)),'k')
+    %plot(88e4:92e4,real(samples(88e4:92e4,i)))
+    %plot(packet_indices(i,BER(i,:) == 0),zeros(1,length(BER(i,BER(i,:) == 0))),'r*')
+    % end-1 in case the previous code errored on the last packet
+    plot(packet_indices(i,1:end-1),real( samples(packet_indices(i,1:end-1),i) ),'r*')
+    %title(strcat("RX Antenna ",num2str(i+1)," - ",filename))
+    title(strcat("RX Antenna ",num2str(i)))
+    xlabel('Samples')
+    ylabel('Amplitude')
+    xlim([1 length(samples(:,i))])
     hold off
 end
 
@@ -282,23 +294,45 @@ end
 % view AoA estimates
 %
 
-figure
-for i=1:length(aoa)
-    for j=1:2
-        subplot(2,1,j)
-        hold on
-        plot(1+(i-1)*num_syms_data:i*num_syms_data,transpose(aoa_extended(j,:,i)),'k')
-        plot(1+(i-1)*num_syms_data,aoa(j,i),'r*')
-        hold off
-    end
+% put angle into
+%     ^
+%     |
+% 2   3   4
+% 180deg  0deg
+
+figure('Renderer', 'painters', 'Position', [10 10 900 600])
+aoaidx = 1:length(aoa);
+aoaidx = aoaidx(sum(BER)==0);
+for i=aoaidx
+    subplot(2,1,1)
+    hold on
+    plot(1+(i-1)*num_syms_data:i*num_syms_data,mod(transpose(aoa_extended(1,:,i))-90,180),'k.')
+    plot(1+(i-1)*num_syms_data,mod(aoa(1,i)-90,180),'r*')
+    %plot(1+(i-1)*num_syms_data:i*num_syms_data,mod(transpose(aoa_extended(1,:,i)),360),'k.')
+    %plot(1+(i-1)*num_syms_data,mod(aoa(1,i),360),'r*')
+    hold off
+    
+    subplot(2,1,2)
+    hold on
+    plot(1+(i-1)*num_syms_data:i*num_syms_data,transpose(tof_extended(1,:,i)),'k.')
+    plot(1+(i-1)*num_syms_data,tof(1,i),'r*')
+    hold off
 end
 
-for j=1:2
-    subplot(2,1,j)
-    legend({'whole packet','just preamble'})
-    title(strcat("Spotfi AoA Estimate (deg) - ",filename," (index ",num2str(j),")"))
-    ylim([-90 90])
-end
+subplot(2,1,1)
+% legend({'whole packet','just preamble'})
+title(strcat("Spotfi AoA Estimate"))
+% axis([1 num_syms_data*length(aoa) -90 90])
+axis([1 num_syms_data*length(aoa) 0 360])
+ylabel('Degrees')
+xlabel('Symbols')
+
+subplot(2,1,2)
+% legend({'whole packet','just preamble'})
+title(strcat("Spotfi ToF Estimate"))
+axis([1 num_syms_data*length(tof) -50 50])
+ylabel('Nano-seconds')
+xlabel('Symbols')
 
 %%
 % distance/angle from center antenna

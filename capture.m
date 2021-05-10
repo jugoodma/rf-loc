@@ -113,10 +113,13 @@ signal = tx_ofdm_chain(bits,P);
 signal = signal / max(signal);
 
 figure
-plot(real(signal));
-title('Time domain OFDM signal to be sent');
+plot(real(signal),'k');
+axis([1 length(signal) -1 1])
+title('Time domain OFDM packet');
+xlabel('Samples')
+ylabel('Amplitude')
 plot_fft(signal, fs);
-title('Frequency domain OFDM signal to be sent');
+title('Frequency domain OFDM packet');
 
 z = zeros(1, SamplesPerFrame);
 z(1) = 1i;

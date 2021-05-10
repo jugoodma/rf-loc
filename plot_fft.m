@@ -14,9 +14,9 @@ function [mag, fftCoeff, freqList] = plot_fft(data, sampleRate)
     freqList = fftshift(f);
     if(nargout == 0)
         figure;
-        plot(freqList/1e6, 20*log(mag));
+        plot(freqList/1e6, 20*log(mag),'k');
         xlabel('Frequency (MHz)');
         ylabel('Magnitude (dB)');
-        set(gca, 'FontSize', 15);
+        %set(gca, 'FontSize', 15);
     end
 end
